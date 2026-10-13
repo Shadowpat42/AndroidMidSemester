@@ -6,9 +6,9 @@ import io.github.dekabrsky.androidMidSemester.data.api.SStatsApi
 import io.github.dekabrsky.androidMidSemester.data.cache.MatchesMemoryCache
 import io.github.dekabrsky.androidMidSemester.data.mapper.toMatch
 import io.github.dekabrsky.androidMidSemester.domain.model.Match
+import io.github.dekabrsky.androidMidSemester.domain.model.Team
 import io.github.dekabrsky.androidMidSemester.domain.repository.MatchRepository
 import java.time.LocalDate
-import java.time.format.DateTimeFormatter
 
 class MatchRepositoryImpl(
     private val api: SStatsApi,
@@ -20,24 +20,14 @@ class MatchRepositoryImpl(
     ): List<Match> =
         cache.getOrLoad(date) {
 
-            val queryDate = date.format(
-                DateTimeFormatter.BASIC_ISO_DATE
-            )
-
             Log.d(
                 "MatchesApi",
-                "GET https://site.api.espn.com/apis/site/v2/sports/soccer/rus.1/scoreboard?dates=$queryDate"
+                "GET https://api.sstats.net/Games/list?Date=$date"
             )
 
-            val response = api.scoreboard(queryDate)
-
-            val leagueName =
-                response.leagues.firstOrNull()?.name
-                    ?: "Russian Premier League"
-
-            response.events.map {
-                it.toMatch(leagueName)
-            }
+            api.gamesOn(date.toString())
+                .data
+                .map { it.toMatch() }
         }
 
     override suspend fun match(
@@ -46,29 +36,82 @@ class MatchRepositoryImpl(
 
         Log.d(
             "MatchesApi",
-            "GET https://site.api.espn.com/apis/site/v2/sports/soccer/rus.1/summary?event=$id"
+            "GET https://api.sstats.net/Games/$id"
         )
 
-        val header = api.summary(id).header
+        return api.game(id).data?.toMatch()
             ?: throw NoSuchElementException(
-                "ESPN: no summary for match $id"
+                "Матч $id не найден"
+            )
+    }
+
+    override suspend fun russianTeams(): List<Team> {
+
+        val result = linkedMapOf<Long, Team>()
+        val pageSize = 100
+        var offset = 0
+        var pages = 0
+
+        val seenPageIds = mutableSetOf<Long>()
+
+        while (pages < 30) {
+
+            Log.d(
+                "TeamsApi",
+                "GET https://api.sstats.net/Teams/list?Country=Russia&offset=$offset&limit=$pageSize"
             )
 
-        val competition = header.competitions.firstOrNull()
-            ?: throw NoSuchElementException(
-                "ESPN: no competition for match $id"
+            val response = api.teamsOn(
+                country = "Russia",
+                offset = offset,
+                limit = pageSize
             )
 
-        val kickoff = competition.date
-            ?: throw NoSuchElementException(
-                "ESPN: no date for match $id"
-            )
+            if (response.status != "OK") {
+                throw IllegalStateException(
+                    "SStats Teams API: ${response.status}"
+                )
+            }
 
-        return competition.toMatch(
-            eventId = id.toString(),
-            eventDate = kickoff,
-            leagueName = header.league?.name
-                ?: "Russian Premier League"
+            val newIds = response.data.count {
+                seenPageIds.add(it.id)
+            }
+
+            response.data
+                .filter {
+                    it.country?.name.equals(
+                        "Russia",
+                        ignoreCase = true
+                    )
+                }
+                .forEach { dto ->
+                    result[dto.id] = Team(
+                        id = dto.id,
+                        name = dto.name,
+                        logoUrl = dto.logoUrl
+                    )
+                }
+
+            pages++
+            offset += response.data.size
+
+            if (
+                response.data.isEmpty() ||
+                response.data.size < pageSize ||
+                offset >= response.totalCount ||
+                newIds == 0
+            ) {
+                break
+            }
+        }
+
+        Log.d(
+            "TeamsApi",
+            "Россия: загружено ${result.size} команд"
         )
+
+        return result.values.sortedBy {
+            it.name.lowercase()
+        }
     }
 }
