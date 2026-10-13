@@ -1,3 +1,4 @@
+
 package io.github.dekabrsky.androidMidSemester.data.api
 
 import io.github.dekabrsky.androidMidSemester.data.api.dto.GameDto
@@ -7,12 +8,15 @@ import retrofit2.http.GET
 import retrofit2.http.Path
 import retrofit2.http.Query
 
-interface SStatsApi {
+interface SStatsApi : EspnApi {
 
-    /** @param date дата в формате "yyyy-MM-dd"; offset/limit захардкожены — не тянуть весь список дня */
     @GET("Games/list?offset=0&limit=10")
-    suspend fun gamesOn(@Query("Date") date: String): ListEnvelope<GameDto>
+    suspend fun gamesOn(
+        @Query("Date") date: String
+    ): ListEnvelope<GameDto>
 
     @GET("Games/{id}")
-    suspend fun game(@Path("id") id: Long): SingleEnvelope<GameDto>
+    suspend fun game(
+        @Path("id") id: Long
+    ): SingleEnvelope<GameDto>
 }
